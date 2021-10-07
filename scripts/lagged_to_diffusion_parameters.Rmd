@@ -1,0 +1,1211 @@
+
+
+# Stabilogram Diffusion Analysis R Script 
+## Large Scale Study 'Posture Across the Lifespan'
+
+### Loading Libraries
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(seewave)
+library(segmented)
+library(car)
+library(tidyverse)
+
+rm(list=ls())   #clear workspace
+shell("cls")    #clear console
+
+
+```
+
+
+
+### Defining Vectors
+```{r}
+list <- list()
+Rsquared_Short <- vector()
+Fit_time_value <- vector()
+Diff_Fast <- vector()
+Rsquared_Long <- vector()
+Diff_Slow <- vector()
+STABILOGRAM_MUGGEO <- list()
+X0_Value_Fast <- vector()
+X0_Value_Slow <- vector()
+Time_Crossover <- vector()
+Result_Crossover <- vector()
+list_Fitline_Long <- list()
+list_Fitline_Short <- list()
+list_my_Results <- list()
+
+Hurst_Fast <- vector()
+Hurst_Slow <- vector()
+Rsquared_Short_H <- vector()
+Rsquared_Long_H <- vector()
+Cross_over_H <- vector()
+list_Fitline_Long_H <- list()
+list_Fitline_Short_H <- list()
+list_my_Results_H <- list()
+Time_Crossover_H <- vector()
+Result_Crossover_H <- vector()
+X0_Value_Fast_H <- vector()
+X0_Value_Slow_H <- vector()
+Fit_time_value_H <- vector()
+
+```
+
+# TOPIC 1: EYES CLOSED ANALYSIS 
+
+### Setting Working Directory And Loading Lagged Distances
+
+```{r warning=FALSE}
+setwd("C:\\Research data\\Postural_Control_Github\\lagged_distances")
+load("list_lagged_distances_EC_X.Rdata")
+load("list_lagged_distances_EC_Y.Rdata")
+load("list_lagged_distances_EC_R.Rdata")
+```
+
+
+# PART 1: DIFFUSION PARAMETERS
+
+## Fit Time By Function "segmented" ~ Muggeo
+
+```{r}
+for(i in 1:301){
+
+STABILOGRAM_MUGGEO[[i]] <- list_lagged_distances_EC_R[[i]][1:3000,] 
+
+fit.glm <- glm(results~time, data=STABILOGRAM_MUGGEO[[i]], family=quasi)
+  
+fit.seg <- segmented(fit.glm, seg.Z = ~time, psi=list(time=c(800)))
+
+Fit_time_value[i] <- summary(fit.seg)$psi[2]
+}
+
+names <- names(list_lagged_distances_EC_R)
+
+
+summary(Fit_time_value)
+
+```
+
+## Calculation of Fast Diffusion component
+
+```{r}
+  for(i in 1:301){
+  linear_dataset <- list_lagged_distances_EC_R[[i]][50:Fit_time_value[i],] 
+  Squared_distance_Short <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  Diff_Fast[i] <- mod$coefficients[2] #slope
+  X0_Value_Fast[i] <- mod$coefficients[1] #Value for x=0
+  
+  summary <- summary(mod)
+  
+  Rsquared_Short[i] <- summary$r.squared
+  Fitvalue_Short <- mod$fitted.values
+  Time_fitline <- 50:Fit_time_value[i]
+  
+  Fitline_Short <- cbind(Time_fitline, Fitvalue_Short)
+  Fitline_Short <- as.data.frame(Fitline_Short)
+  
+  list_Fitline_Short[[i]] <- Fitline_Short
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Short, Squared_distance_Short))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_Short)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Short)
+  #print(PRINT)
+  }
+summary(Rsquared_Short)
+
+
+```
+
+
+## Calculation of Slow Diffusion component
+```{r}
+  for(i in 1:301){
+  linear_dataset <- list_lagged_distances_EC_R[[i]][Fit_time_value[i]:10000,] 
+  Squared_distance_long <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  X0_Value_Slow[i] <- mod$coefficients[1] #Value for x=0
+  Diff_Slow[i] <- mod$coefficients[2]
+  summary <- summary(mod)
+  
+  Rsquared_Long[i] <- summary$r.squared
+  Fitvalue_Long <- mod$fitted.values
+  Time_fitline <- Fit_time_value[i]:10000
+  
+  Fitline_Long <- cbind(Time_fitline, Fitvalue_Long)
+  Fitline_Long <- as.data.frame(Fitline_Long)
+  
+  list_Fitline_Long[[i]] <- Fitline_Long
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Long, Squared_distance_long))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_long)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Long)
+  #print(PRINT)
+  }
+summary(Rsquared_Long)
+
+```
+
+## Calculation Of Cross Over
+
+```{r}
+for(i in 1:301){
+mycoeffmatrix <- matrix(c(-Diff_Fast[i], 1, -Diff_Slow[i], 1), nrow=2, ncol = 2, byrow=TRUE)
+myRhsMatrix <- matrix(c(X0_Value_Fast[i], X0_Value_Slow[i]), nrow=2, ncol = 1, byrow=TRUE)
+myInverse <- solve(mycoeffmatrix)
+myResult <- myInverse%*%myRhsMatrix
+
+Time_Crossover[i] <- myResult[1,1]
+Result_Crossover[i] <- myResult[2,1]
+
+list_my_Results[[i]] <- myResult
+
+}
+
+summary(Time_Crossover)
+
+```
+
+
+
+
+# Final Diffusion Plot 
+
+```{r}
+#Determining the GG lines to connect the linear regressions with the crossover (to check visually)
+
+for(i in 1:20){
+  
+myResult <- list_my_Results[[i]]
+Fitline_Long <- list_Fitline_Long[[i]]
+Fitline_Short <- list_Fitline_Short[[i]]
+X <- Fitline_Long[1,1]
+Y <- Fitline_Long[1,2]
+vector1_LONG <- c(X,Y)
+vector2 <- myResult[,1]
+
+GG_LINE_LONG <- as.data.frame(rbind(vector1_LONG, vector2))
+
+
+X <- Fitline_Short[1,1]
+Y <- Fitline_Short[1,2]
+vector1_SHORT<- c(X,Y)
+
+GG_LINE_SHORT <- as.data.frame(rbind(vector1_SHORT, vector2))
+
+#Plotting 
+
+colnames(Fitline_Short) <- c("Time_fitline", "Fitvalue")
+colnames(Fitline_Long) <- c("Time_fitline", "Fitvalue")
+  TOTAL_FIT <- rbind(Fitline_Short, Fitline_Long)
+  
+
+  again <- list_lagged_distances_EC_R[[i]][50:10000,]
+  
+  again <- cbind(again, TOTAL_FIT$Fitvalue)
+
+  wow <- again%>%
+    ggplot(aes(x=time, y=results)) +
+    geom_line()+
+    geom_line(data=Fitline_Long, aes(Time_fitline, Fitvalue))+
+    geom_line(data=Fitline_Short, aes(Time_fitline, Fitvalue))+
+    ggtitle(names[i])+
+    geom_point(aes(x=Time_Crossover[i], Result_Crossover[i]), colour="blue", size=4)+
+    geom_line(data=GG_LINE_LONG, aes(V1, V2), linetype = "longdash")+
+    geom_line(data=GG_LINE_SHORT, aes(V1, V2), linetype = "longdash")
+  print(wow)
+}
+```
+
+
+
+# PART 2: EC X HURST PARAMETERS OF ALL TRIALS
+
+
+
+
+## Fit Time By Function "segmented" ~ Muggeo
+
+```{r}
+for(i in 1:301){
+
+STABILOGRAM_MUGGEO[[i]] <- list_lagged_distances_EC_R[[i]][1:3000,] #skip de eerste 5 ms
+
+
+STABILOGRAM_MUGGEO[[i]]$time <- log10(STABILOGRAM_MUGGEO[[i]]$time)
+STABILOGRAM_MUGGEO[[i]]$results <- log10(STABILOGRAM_MUGGEO[[i]]$results)
+
+fit.glm <- glm(results~time, data=STABILOGRAM_MUGGEO[[i]], family=quasi)
+  
+fit.seg <- segmented(fit.glm, seg.Z = ~time, psi=list(time=c(2.9)))
+
+Fit_time_value_H[i] <- summary(fit.seg)$psi[2]
+}
+
+
+
+summary(10^Fit_time_value_H)
+
+```
+
+
+
+## Calculation of Fast Hurst component
+
+```{r}
+
+  for(i in 1:301){
+  
+  linear_dataset <- list_lagged_distances_EC_R[[i]]
+  linear_dataset$time <- log10(linear_dataset$time)
+  linear_dataset$results <- log10(linear_dataset$results)
+  
+  linear_dataset <- linear_dataset[1:(10^Fit_time_value_H[i]),]
+  
+  
+  
+  Squared_distance_Short <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  #### TOT HIER KLOPT HET!! 
+  
+  Hurst_Fast[i] <- mod$coefficients[2] #slope
+  X0_Value_Fast_H[i] <- mod$coefficients[1] #Value for x=0
+  
+  summary <- summary(mod)
+  
+  Rsquared_Short_H[i] <- summary$r.squared
+  Fitvalue_Short <- mod$fitted.values
+  
+  Time_fitline <- linear_dataset$time
+  
+  
+  Fitline_Short <- cbind(Time_fitline, Fitvalue_Short)
+  Fitline_Short <- as.data.frame(Fitline_Short)
+  
+  list_Fitline_Short_H[[i]] <- Fitline_Short
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Short, Squared_distance_Short))
+  #PRINT <- df%>%
+  #ggplot(aes(x=Time_fitline, y=Squared_distance_Short)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Short)
+  #print(PRINT)
+  
+  }
+summary(Rsquared_Short_H)
+
+summary(Hurst_Fast)
+
+
+```
+
+
+## Calculation of Slow Hurst component
+```{r}
+
+  for(i in 1:301){
+    
+  linear_dataset <- list_lagged_distances_EC_R[[i]]
+  linear_dataset$time <- log10(linear_dataset$time)
+  linear_dataset$results <- log10(linear_dataset$results)
+  nrow(linear_dataset)
+  linear_dataset <- linear_dataset[(10^Fit_time_value_H[i]):10000,]
+  
+  Squared_distance_long <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  
+  X0_Value_Slow_H[i] <- mod$coefficients[1] #Value for x=0
+  Hurst_Slow[i] <- mod$coefficients[2]
+  
+  summary <- summary(mod)
+  
+  Rsquared_Long_H[i] <- summary$r.squared
+  Fitvalue_Long <- mod$fitted.values
+  
+  Time_fitline <- linear_dataset$time
+  
+  Fitline_Long <- cbind(Time_fitline, Fitvalue_Long)
+  Fitline_Long <- as.data.frame(Fitline_Long)
+  
+  list_Fitline_Long_H[[i]] <- Fitline_Long
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Long, Squared_distance_long))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_long)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Long)
+  #print(PRINT)
+  }
+summary(Rsquared_Long_H)
+
+summary(Hurst_Fast)
+
+```
+
+
+## Calculation Of Cross Over
+
+```{r}
+for(i in 1:301){
+mycoeffmatrix <- matrix(c(-Hurst_Fast[i], 1, -Hurst_Slow[i], 1), nrow=2, ncol = 2, byrow=TRUE)
+myRhsMatrix <- matrix(c(X0_Value_Fast_H[i], X0_Value_Slow_H[i]), nrow=2, ncol = 1, byrow=TRUE)
+myInverse <- solve(mycoeffmatrix)
+myResult <- myInverse%*%myRhsMatrix
+
+Time_Crossover_H[i] <- myResult[1,1]
+Result_Crossover_H[i] <- myResult[2,1]
+
+list_my_Results_H[[i]] <- myResult
+
+}
+
+summary(Time_Crossover_H)
+
+```
+
+
+# EC X SAVE
+
+
+## Data wrangling
+
+
+```{r message=FALSE, warning=FALSE}
+Subj <- as.numeric(names)
+
+stabilogram_EC_R <- cbind.data.frame(Subj, Diff_Fast, Diff_Slow, Time_Crossover, Fit_time_value, Hurst_Fast, Hurst_Slow, Time_Crossover_H, Fit_time_value_H, Result_Crossover)
+
+colnames(stabilogram_EC_R) <- c("Subj", "d_s", "d_l", "d_cx", "d_segm", "h_s", "h_l", "h_cx", "h_segm", "d_cy")
+
+options("scipen"=100, "digits"=4)
+
+stabilogram_EC_R <- pivot_longer(stabilogram_EC_R, cols=c("d_s", "d_l", "d_cx", "d_segm", "h_s", "h_l", "h_cx", "h_segm", "d_cy"), names_to = "Param")
+
+
+```
+
+
+
+
+#################################
+
+
+
+
+
+### Defining Vectors
+```{r}
+list <- list()
+Rsquared_Short <- vector()
+Fit_time_value <- vector()
+Diff_Fast <- vector()
+Rsquared_Long <- vector()
+Diff_Slow <- vector()
+STABILOGRAM_MUGGEO <- list()
+X0_Value_Fast <- vector()
+X0_Value_Slow <- vector()
+Time_Crossover <- vector()
+Result_Crossover <- vector()
+list_Fitline_Long <- list()
+list_Fitline_Short <- list()
+list_my_Results <- list()
+
+Hurst_Fast <- vector()
+Hurst_Slow <- vector()
+Rsquared_Short_H <- vector()
+Rsquared_Long_H <- vector()
+Cross_over_H <- vector()
+list_Fitline_Long_H <- list()
+list_Fitline_Short_H <- list()
+list_my_Results_H <- list()
+Time_Crossover_H <- vector()
+Result_Crossover_H <- vector()
+X0_Value_Fast_H <- vector()
+X0_Value_Slow_H <- vector()
+Fit_time_value_H <- vector()
+
+```
+
+# TOPIC 1: EYES CLOSED ANALYSIS 
+
+### Setting Working Directory And Loading Lagged Distances
+
+```{r warning=FALSE}
+setwd("C:\\Research data\\Postural_Control_Github\\lagged_distances")
+load("list_lagged_distances_TR_X.Rdata")
+load("list_lagged_distances_TR_Y.Rdata")
+load("list_lagged_distances_TR_R.Rdata")
+```
+
+
+# PART 1: DIFFUSION PARAMETERS
+
+## Fit Time By Function "segmented" ~ Muggeo
+
+```{r}
+for(i in 1:301){
+
+STABILOGRAM_MUGGEO[[i]] <- list_lagged_distances_TR_R[[i]][1:3000,] 
+
+fit.glm <- glm(results~time, data=STABILOGRAM_MUGGEO[[i]], family=quasi)
+  
+fit.seg <- segmented(fit.glm, seg.Z = ~time, psi=list(time=c(800)))
+
+Fit_time_value[i] <- summary(fit.seg)$psi[2]
+}
+
+names <- names(list_lagged_distances_TR_R)
+
+
+summary(Fit_time_value)
+
+```
+
+## Calculation of Fast Diffusion component
+
+```{r}
+  for(i in 1:301){
+  linear_dataset <- list_lagged_distances_TR_R[[i]][50:Fit_time_value[i],] 
+  Squared_distance_Short <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  Diff_Fast[i] <- mod$coefficients[2] #slope
+  X0_Value_Fast[i] <- mod$coefficients[1] #Value for x=0
+  
+  summary <- summary(mod)
+  
+  Rsquared_Short[i] <- summary$r.squared
+  Fitvalue_Short <- mod$fitted.values
+  Time_fitline <- 50:Fit_time_value[i]
+  
+  Fitline_Short <- cbind(Time_fitline, Fitvalue_Short)
+  Fitline_Short <- as.data.frame(Fitline_Short)
+  
+  list_Fitline_Short[[i]] <- Fitline_Short
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Short, Squared_distance_Short))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_Short)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Short)
+  #print(PRINT)
+  }
+summary(Rsquared_Short)
+
+
+```
+
+
+## Calculation of Slow Diffusion component
+```{r}
+  for(i in 1:301){
+  linear_dataset <- list_lagged_distances_TR_R[[i]][Fit_time_value[i]:10000,] 
+  Squared_distance_long <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  X0_Value_Slow[i] <- mod$coefficients[1] #Value for x=0
+  Diff_Slow[i] <- mod$coefficients[2]
+  summary <- summary(mod)
+  
+  Rsquared_Long[i] <- summary$r.squared
+  Fitvalue_Long <- mod$fitted.values
+  Time_fitline <- Fit_time_value[i]:10000
+  
+  Fitline_Long <- cbind(Time_fitline, Fitvalue_Long)
+  Fitline_Long <- as.data.frame(Fitline_Long)
+  
+  list_Fitline_Long[[i]] <- Fitline_Long
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Long, Squared_distance_long))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_long)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Long)
+  #print(PRINT)
+  }
+summary(Rsquared_Long)
+
+```
+
+## Calculation Of Cross Over
+
+```{r}
+for(i in 1:301){
+mycoeffmatrix <- matrix(c(-Diff_Fast[i], 1, -Diff_Slow[i], 1), nrow=2, ncol = 2, byrow=TRUE)
+myRhsMatrix <- matrix(c(X0_Value_Fast[i], X0_Value_Slow[i]), nrow=2, ncol = 1, byrow=TRUE)
+myInverse <- solve(mycoeffmatrix)
+myResult <- myInverse%*%myRhsMatrix
+
+Time_Crossover[i] <- myResult[1,1]
+Result_Crossover[i] <- myResult[2,1]
+
+list_my_Results[[i]] <- myResult
+
+}
+
+summary(Time_Crossover)
+
+```
+
+
+
+
+# Final Diffusion Plot 
+
+```{r}
+#Determining the GG lines to connect the linear regressions with the crossover (to check visually)
+
+for(i in 1:20){
+  
+myResult <- list_my_Results[[i]]
+Fitline_Long <- list_Fitline_Long[[i]]
+Fitline_Short <- list_Fitline_Short[[i]]
+X <- Fitline_Long[1,1]
+Y <- Fitline_Long[1,2]
+vector1_LONG <- c(X,Y)
+vector2 <- myResult[,1]
+
+GG_LINE_LONG <- as.data.frame(rbind(vector1_LONG, vector2))
+
+
+X <- Fitline_Short[1,1]
+Y <- Fitline_Short[1,2]
+vector1_SHORT<- c(X,Y)
+
+GG_LINE_SHORT <- as.data.frame(rbind(vector1_SHORT, vector2))
+
+#Plotting 
+
+colnames(Fitline_Short) <- c("Time_fitline", "Fitvalue")
+colnames(Fitline_Long) <- c("Time_fitline", "Fitvalue")
+  TOTAL_FIT <- rbind(Fitline_Short, Fitline_Long)
+  
+
+  again <- list_lagged_distances_TR_R[[i]][50:10000,]
+  
+  again <- cbind(again, TOTAL_FIT$Fitvalue)
+
+  wow <- again%>%
+    ggplot(aes(x=time, y=results)) +
+    geom_line()+
+    geom_line(data=Fitline_Long, aes(Time_fitline, Fitvalue))+
+    geom_line(data=Fitline_Short, aes(Time_fitline, Fitvalue))+
+    ggtitle(names[i])+
+    geom_point(aes(x=Time_Crossover[i], Result_Crossover[i]), colour="blue", size=4)+
+    geom_line(data=GG_LINE_LONG, aes(V1, V2), linetype = "longdash")+
+    geom_line(data=GG_LINE_SHORT, aes(V1, V2), linetype = "longdash")
+  print(wow)
+}
+```
+
+
+
+# PART 2: TR X HURST PARAMETERS OF ALL TRIALS
+
+
+
+
+## Fit Time By Function "segmented" ~ Muggeo
+
+```{r}
+for(i in 1:301){
+
+STABILOGRAM_MUGGEO[[i]] <- list_lagged_distances_TR_R[[i]][1:3000,] #skip de eerste 5 ms
+
+
+STABILOGRAM_MUGGEO[[i]]$time <- log10(STABILOGRAM_MUGGEO[[i]]$time)
+STABILOGRAM_MUGGEO[[i]]$results <- log10(STABILOGRAM_MUGGEO[[i]]$results)
+
+fit.glm <- glm(results~time, data=STABILOGRAM_MUGGEO[[i]], family=quasi)
+  
+fit.seg <- segmented(fit.glm, seg.Z = ~time, psi=list(time=c(2.9)))
+
+Fit_time_value_H[i] <- summary(fit.seg)$psi[2]
+}
+
+
+
+summary(10^Fit_time_value_H)
+
+```
+
+
+
+## Calculation of Fast Hurst component
+
+```{r}
+
+  for(i in 1:301){
+  
+  linear_dataset <- list_lagged_distances_TR_R[[i]]
+  linear_dataset$time <- log10(linear_dataset$time)
+  linear_dataset$results <- log10(linear_dataset$results)
+  
+  linear_dataset <- linear_dataset[1:(10^Fit_time_value_H[i]),]
+  
+  
+  
+  Squared_distance_Short <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  #### TOT HIER KLOPT HET!! 
+  
+  Hurst_Fast[i] <- mod$coefficients[2] #slope
+  X0_Value_Fast_H[i] <- mod$coefficients[1] #Value for x=0
+  
+  summary <- summary(mod)
+  
+  Rsquared_Short_H[i] <- summary$r.squared
+  Fitvalue_Short <- mod$fitted.values
+  
+  Time_fitline <- linear_dataset$time
+  
+  
+  Fitline_Short <- cbind(Time_fitline, Fitvalue_Short)
+  Fitline_Short <- as.data.frame(Fitline_Short)
+  
+  list_Fitline_Short_H[[i]] <- Fitline_Short
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Short, Squared_distance_Short))
+  #PRINT <- df%>%
+  #ggplot(aes(x=Time_fitline, y=Squared_distance_Short)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Short)
+  #print(PRINT)
+  
+  }
+summary(Rsquared_Short_H)
+
+summary(Hurst_Fast)
+
+
+```
+
+
+## Calculation of Slow Hurst component
+```{r}
+
+  for(i in 1:301){
+    
+  linear_dataset <- list_lagged_distances_TR_R[[i]]
+  linear_dataset$time <- log10(linear_dataset$time)
+  linear_dataset$results <- log10(linear_dataset$results)
+  nrow(linear_dataset)
+  linear_dataset <- linear_dataset[(10^Fit_time_value_H[i]):10000,]
+  
+  Squared_distance_long <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  
+  X0_Value_Slow_H[i] <- mod$coefficients[1] #Value for x=0
+  Hurst_Slow[i] <- mod$coefficients[2]
+  
+  summary <- summary(mod)
+  
+  Rsquared_Long_H[i] <- summary$r.squared
+  Fitvalue_Long <- mod$fitted.values
+  
+  Time_fitline <- linear_dataset$time
+  
+  Fitline_Long <- cbind(Time_fitline, Fitvalue_Long)
+  Fitline_Long <- as.data.frame(Fitline_Long)
+  
+  list_Fitline_Long_H[[i]] <- Fitline_Long
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Long, Squared_distance_long))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_long)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Long)
+  #print(PRINT)
+  }
+summary(Rsquared_Long_H)
+
+summary(Hurst_Fast)
+
+```
+
+
+## Calculation Of Cross Over
+
+```{r}
+for(i in 1:301){
+mycoeffmatrix <- matrix(c(-Hurst_Fast[i], 1, -Hurst_Slow[i], 1), nrow=2, ncol = 2, byrow=TRUE)
+myRhsMatrix <- matrix(c(X0_Value_Fast_H[i], X0_Value_Slow_H[i]), nrow=2, ncol = 1, byrow=TRUE)
+myInverse <- solve(mycoeffmatrix)
+myResult <- myInverse%*%myRhsMatrix
+
+Time_Crossover_H[i] <- myResult[1,1]
+Result_Crossover_H[i] <- myResult[2,1]
+
+list_my_Results_H[[i]] <- myResult
+
+}
+
+summary(Time_Crossover_H)
+
+```
+
+
+# TR X SAVE
+
+
+## Data wrangling
+
+
+```{r message=FALSE, warning=FALSE}
+Subj <- as.numeric(names)
+
+stabilogram_TR_R <- cbind.data.frame(Subj, Diff_Fast, Diff_Slow, Time_Crossover, Fit_time_value, Hurst_Fast, Hurst_Slow, Time_Crossover_H, Fit_time_value_H, Result_Crossover)
+
+colnames(stabilogram_TR_R) <- c("Subj", "d_s", "d_l", "d_cx", "d_segm", "h_s", "h_l", "h_cx", "h_segm", "d_cy")
+
+options("scipen"=100, "digits"=4)
+
+stabilogram_TR_R <- pivot_longer(stabilogram_TR_R, cols=c("d_s", "d_l", "d_cx", "d_segm", "h_s", "h_l", "h_cx", "h_segm", "d_cy"), names_to = "Param")
+
+
+
+```
+
+
+
+
+
+
+#################################
+
+
+
+
+
+### Defining Vectors
+```{r}
+list <- list()
+Rsquared_Short <- vector()
+Fit_time_value <- vector()
+Diff_Fast <- vector()
+Rsquared_Long <- vector()
+Diff_Slow <- vector()
+STABILOGRAM_MUGGEO <- list()
+X0_Value_Fast <- vector()
+X0_Value_Slow <- vector()
+Time_Crossover <- vector()
+Result_Crossover <- vector()
+list_Fitline_Long <- list()
+list_Fitline_Short <- list()
+list_my_Results <- list()
+
+Hurst_Fast <- vector()
+Hurst_Slow <- vector()
+Rsquared_Short_H <- vector()
+Rsquared_Long_H <- vector()
+Cross_over_H <- vector()
+list_Fitline_Long_H <- list()
+list_Fitline_Short_H <- list()
+list_my_Results_H <- list()
+Time_Crossover_H <- vector()
+Result_Crossover_H <- vector()
+X0_Value_Fast_H <- vector()
+X0_Value_Slow_H <- vector()
+Fit_time_value_H <- vector()
+
+```
+
+# TOPIC 1: EO ANALYSIS 
+
+### Setting Working Directory And Loading Lagged Distances
+
+```{r warning=FALSE}
+setwd("C:\\Research data\\Postural_Control_Github\\lagged_distances")
+load("list_lagged_distances_EO_X.Rdata")
+load("list_lagged_distances_EO_Y.Rdata")
+load("list_lagged_distances_EO_R.Rdata")
+```
+
+
+# PART 1: DIFFUSION PARAMETERS
+
+## Fit Time By Function "segmented" ~ Muggeo
+
+```{r}
+for(i in 1:1204){
+
+STABILOGRAM_MUGGEO[[i]] <- list_lagged_distances_EO_R[[i]][1:3000,] 
+
+fit.glm <- glm(results~time, data=STABILOGRAM_MUGGEO[[i]], family=quasi)
+  
+fit.seg <- segmented(fit.glm, seg.Z = ~time, psi=list(time=c(800)))
+
+Fit_time_value[i] <- summary(fit.seg)$psi[2]
+}
+
+
+
+# Keeping only the first part of the name which is equivalent to their subject ID ("names_1")
+names <- names(list_lagged_distances_EO_R)
+
+
+names_split <- strsplit(names, split='_', fixed=TRUE)
+
+names_1 <- vector()
+trial <- vector()
+
+for(i in 1:1204){
+names_1[i] <- names_split[[i]][1]
+trial[i] <- names_split[[i]][2]
+
+}
+
+
+
+# Summary of the breakpoint values ("Fit_time_value[i]")
+summary(Fit_time_value)
+
+
+```
+
+## Calculation of Fast Diffusion component
+
+```{r}
+  for(i in 1:1204){
+  linear_dataset <- list_lagged_distances_EO_R[[i]][50:Fit_time_value[i],] 
+  Squared_distance_Short <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  Diff_Fast[i] <- mod$coefficients[2] #slope
+  X0_Value_Fast[i] <- mod$coefficients[1] #Value for x=0
+  
+  summary <- summary(mod)
+  
+  Rsquared_Short[i] <- summary$r.squared
+  Fitvalue_Short <- mod$fitted.values
+  Time_fitline <- 50:Fit_time_value[i]
+  
+  Fitline_Short <- cbind(Time_fitline, Fitvalue_Short)
+  Fitline_Short <- as.data.frame(Fitline_Short)
+  
+  list_Fitline_Short[[i]] <- Fitline_Short
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Short, Squared_distance_Short))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_Short)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Short)
+  #print(PRINT)
+  }
+summary(Rsquared_Short)
+
+
+```
+
+
+## Calculation of Slow Diffusion component
+```{r}
+  for(i in 1:1204){
+  linear_dataset <- list_lagged_distances_EO_R[[i]][Fit_time_value[i]:10000,] 
+  Squared_distance_long <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  X0_Value_Slow[i] <- mod$coefficients[1] #Value for x=0
+  Diff_Slow[i] <- mod$coefficients[2]
+  summary <- summary(mod)
+  
+  Rsquared_Long[i] <- summary$r.squared
+  Fitvalue_Long <- mod$fitted.values
+  Time_fitline <- Fit_time_value[i]:10000
+  
+  Fitline_Long <- cbind(Time_fitline, Fitvalue_Long)
+  Fitline_Long <- as.data.frame(Fitline_Long)
+  
+  list_Fitline_Long[[i]] <- Fitline_Long
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Long, Squared_distance_long))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_long)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Long)
+  #print(PRINT)
+  }
+summary(Rsquared_Long)
+
+```
+
+## Calculation Of Cross Over
+
+```{r}
+for(i in 1:1204){
+mycoeffmatrix <- matrix(c(-Diff_Fast[i], 1, -Diff_Slow[i], 1), nrow=2, ncol = 2, byrow=TRUE)
+myRhsMatrix <- matrix(c(X0_Value_Fast[i], X0_Value_Slow[i]), nrow=2, ncol = 1, byrow=TRUE)
+myInverse <- solve(mycoeffmatrix)
+myResult <- myInverse%*%myRhsMatrix
+
+Time_Crossover[i] <- myResult[1,1]
+Result_Crossover[i] <- myResult[2,1]
+
+list_my_Results[[i]] <- myResult
+
+}
+
+summary(Time_Crossover)
+
+```
+
+
+
+
+# Final Diffusion Plot 
+
+```{r}
+#Determining the GG lines to connect the linear regressions with the crossover (to check visually)
+
+for(i in 1:20){
+  
+myResult <- list_my_Results[[i]]
+Fitline_Long <- list_Fitline_Long[[i]]
+Fitline_Short <- list_Fitline_Short[[i]]
+X <- Fitline_Long[1,1]
+Y <- Fitline_Long[1,2]
+vector1_LONG <- c(X,Y)
+vector2 <- myResult[,1]
+
+GG_LINE_LONG <- as.data.frame(rbind(vector1_LONG, vector2))
+
+
+X <- Fitline_Short[1,1]
+Y <- Fitline_Short[1,2]
+vector1_SHORT<- c(X,Y)
+
+GG_LINE_SHORT <- as.data.frame(rbind(vector1_SHORT, vector2))
+
+#Plotting 
+
+colnames(Fitline_Short) <- c("Time_fitline", "Fitvalue")
+colnames(Fitline_Long) <- c("Time_fitline", "Fitvalue")
+  TOTAL_FIT <- rbind(Fitline_Short, Fitline_Long)
+  
+
+  again <- list_lagged_distances_EO_R[[i]][50:10000,]
+  
+  again <- cbind(again, TOTAL_FIT$Fitvalue)
+
+  wow <- again%>%
+    ggplot(aes(x=time, y=results)) +
+    geom_line()+
+    geom_line(data=Fitline_Long, aes(Time_fitline, Fitvalue))+
+    geom_line(data=Fitline_Short, aes(Time_fitline, Fitvalue))+
+    ggtitle(names[i])+
+    geom_point(aes(x=Time_Crossover[i], Result_Crossover[i]), colour="blue", size=4)+
+    geom_line(data=GG_LINE_LONG, aes(V1, V2), linetype = "longdash")+
+    geom_line(data=GG_LINE_SHORT, aes(V1, V2), linetype = "longdash")
+  print(wow)
+}
+```
+
+
+
+# PART 2: EO X HURST PARAMETERS OF ALL TRIALS
+
+
+
+
+## Fit Time By Function "segmented" ~ Muggeo
+
+```{r}
+for(i in 1:1204){
+
+STABILOGRAM_MUGGEO[[i]] <- list_lagged_distances_EO_R[[i]][1:3000,] #skip de eerste 5 ms
+
+
+STABILOGRAM_MUGGEO[[i]]$time <- log10(STABILOGRAM_MUGGEO[[i]]$time)
+STABILOGRAM_MUGGEO[[i]]$results <- log10(STABILOGRAM_MUGGEO[[i]]$results)
+
+fit.glm <- glm(results~time, data=STABILOGRAM_MUGGEO[[i]], family=quasi)
+  
+fit.seg <- segmented(fit.glm, seg.Z = ~time, psi=list(time=c(2.9)))
+
+Fit_time_value_H[i] <- summary(fit.seg)$psi[2]
+}
+
+
+
+summary(10^Fit_time_value_H)
+
+```
+
+
+
+## Calculation of Fast Hurst component
+
+```{r}
+
+  for(i in 1:1204){
+  
+  linear_dataset <- list_lagged_distances_EO_R[[i]]
+  linear_dataset$time <- log10(linear_dataset$time)
+  linear_dataset$results <- log10(linear_dataset$results)
+  
+  linear_dataset <- linear_dataset[1:(10^Fit_time_value_H[i]),]
+  
+  
+  
+  Squared_distance_Short <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  #### TOT HIER KLOPT HET!! 
+  
+  Hurst_Fast[i] <- mod$coefficients[2] #slope
+  X0_Value_Fast_H[i] <- mod$coefficients[1] #Value for x=0
+  
+  summary <- summary(mod)
+  
+  Rsquared_Short_H[i] <- summary$r.squared
+  Fitvalue_Short <- mod$fitted.values
+  
+  Time_fitline <- linear_dataset$time
+  
+  
+  Fitline_Short <- cbind(Time_fitline, Fitvalue_Short)
+  Fitline_Short <- as.data.frame(Fitline_Short)
+  
+  list_Fitline_Short_H[[i]] <- Fitline_Short
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Short, Squared_distance_Short))
+  #PRINT <- df%>%
+  #ggplot(aes(x=Time_fitline, y=Squared_distance_Short)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Short)
+  #print(PRINT)
+  
+  }
+summary(Rsquared_Short_H)
+
+summary(Hurst_Fast)
+
+
+```
+
+
+## Calculation of Slow Hurst component
+```{r}
+
+  for(i in 1:1204){
+    
+  linear_dataset <- list_lagged_distances_EO_R[[i]]
+  linear_dataset$time <- log10(linear_dataset$time)
+  linear_dataset$results <- log10(linear_dataset$results)
+  nrow(linear_dataset)
+  linear_dataset <- linear_dataset[(10^Fit_time_value_H[i]):10000,]
+  
+  Squared_distance_long <- linear_dataset$results
+  mod <- lm(linear_dataset$results~linear_dataset$time)
+  
+  
+  X0_Value_Slow_H[i] <- mod$coefficients[1] #Value for x=0
+  Hurst_Slow[i] <- mod$coefficients[2]
+  
+  summary <- summary(mod)
+  
+  Rsquared_Long_H[i] <- summary$r.squared
+  Fitvalue_Long <- mod$fitted.values
+  
+  Time_fitline <- linear_dataset$time
+  
+  Fitline_Long <- cbind(Time_fitline, Fitvalue_Long)
+  Fitline_Long <- as.data.frame(Fitline_Long)
+  
+  list_Fitline_Long_H[[i]] <- Fitline_Long
+  
+  #df <- as.data.frame(cbind(Time_fitline, Fitvalue_Long, Squared_distance_long))
+  #PRINT <- df%>%
+  #  ggplot(aes(x=Time_fitline, y=Squared_distance_long)) +
+  #  geom_line()+
+  #  geom_line(y=Fitvalue_Long)
+  #print(PRINT)
+  }
+summary(Rsquared_Long_H)
+
+summary(Hurst_Fast)
+
+```
+
+
+## Calculation Of Cross Over
+
+```{r}
+for(i in 1:1204){
+mycoeffmatrix <- matrix(c(-Hurst_Fast[i], 1, -Hurst_Slow[i], 1), nrow=2, ncol = 2, byrow=TRUE)
+myRhsMatrix <- matrix(c(X0_Value_Fast_H[i], X0_Value_Slow_H[i]), nrow=2, ncol = 1, byrow=TRUE)
+myInverse <- solve(mycoeffmatrix)
+myResult <- myInverse%*%myRhsMatrix
+
+Time_Crossover_H[i] <- myResult[1,1]
+Result_Crossover_H[i] <- myResult[2,1]
+
+list_my_Results_H[[i]] <- myResult
+
+}
+
+summary(Time_Crossover_H)
+
+```
+
+
+# EO X SAVE
+
+
+## Data wrangling
+
+
+```{r message=FALSE, warning=FALSE}
+Subj <- as.numeric(names_1)
+trial <- as.numeric(trial)
+Subjtrial <- names
+
+stabilogram_EO_R <- cbind.data.frame(Subj, Diff_Fast, Diff_Slow, Time_Crossover, Fit_time_value, Hurst_Fast, Hurst_Slow, Time_Crossover_H, Fit_time_value_H, Result_Crossover, trial, Subjtrial)
+
+colnames(stabilogram_EO_R) <- c("Subj", "d_s", "d_l", "d_cx", "d_segm", "h_s", "h_l", "h_cx", "h_segm", "d_cy", "trial", "Subjtrial")
+
+options("scipen"=100, "digits"=4)
+
+stabilogram_EO_R <- pivot_longer(stabilogram_EO_R, cols=c("d_s", "d_l", "d_cx", "d_segm", "h_s", "h_l", "h_cx", "h_segm", "d_cy"), names_to = "Param")
+
+
+
+stabilogram_EO_R$Subjtrial <- NULL
+stabilogram_EC_R$trial <- 1
+stabilogram_TR_R$trial <- 1
+
+stabilogram_EO_R$Stance <- "EO"
+stabilogram_EC_R$Stance <- "EC"
+stabilogram_TR_R$Stance <- "TR"
+
+
+stabilogram_parameters <-  rbind.data.frame(stabilogram_EO_R, stabilogram_EC_R, stabilogram_TR_R)
+
+stabilogram_parameters <- stabilogram_parameters %>%
+  pivot_wider(names_from = Param, values_from = value, id_cols = c(Subj, trial, Stance))
+
+setwd("C:\\Research data\\Postural_Control_Github\\preprocessing_data")
+save(stabilogram_parameters, file="stabilogram_parameters.Rdata")
+
+
+
+```
+
+
+
+
+
+
+
+

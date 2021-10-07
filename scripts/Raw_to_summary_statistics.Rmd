@@ -1,0 +1,241 @@
+# In this script, we calculate the summary statistics ellipse area and pathlengths / COP velocity for each trial. 
+
+## Eyes Open
+```{r}
+
+ALLESFUNCTIE <- function
+(.file){
+  
+#subject number
+  trial= NA
+  subj <- str_sub(.file, 3, 6)
+  names_split <- strsplit(subj, split='_', fixed=TRUE)
+  Subj <- unlist(names_split)
+  Stance <- "EO"
+  
+  # Selecting X and Y coordinates
+
+  data <- read.table(.file, skip=4, sep="")
+  data <- data[,c(8,9)]
+
+  # Create extra second at the beginning and at the end
+  extra1 <- data[c(1000:1),]
+  extra2 <- data[c(30000:29001),]
+
+  data <- rbind.data.frame(extra1, data, extra2)
+
+  colnames(data) <- c('FP.COFx', 'FP.COFy')
+  
+  # We make this "fake" points because butterworse filter will distort the first and last data points.
+  
+  # Butterworse filtering
+  f=1000
+  data$'FP.COFx' <- bwfilter(data$'FP.COFx', f=f, n=4, to=13)
+  data$'FP.COFy' <- bwfilter(data$'FP.COFy', f=f, n=4, to=13)
+
+  ROW <- nrow(data)
+  data <- data[c(1001:(ROW-1000)),] # Removing "fake" points after filter application
+  
+  # Ellipse area 
+  
+  # principle component analysis
+  pca <- princomp(data)
+  length1 <- 1.96*pca$sdev[1]
+  length2 <- 1.96*pca$sdev[2]
+  # SURFACE AREA CALCULATION
+  A <- length1*length2*pi
+  A_ELLIPSE <- as.numeric(A)
+  
+  colnames(data) <- c("X", "Y")
+  
+  # Pathlenghts
+  
+  diffx <- abs(diff(data$X))
+  diffy <- abs(diff(data$Y))
+  diffz <- sqrt(diffy^2+diffx^2)
+  
+  ML_PTH <- sum(diffx)
+  AP_PTH <- sum(diffy)
+  PL_PTH <- sum(diffz)
+  
+  Pathlength <-cbind(PL_PTH, ML_PTH, AP_PTH)
+
+cbind.data.frame(Subj, trial, Stance, ML_PTH, AP_PTH, PL_PTH, A_ELLIPSE)
+}
+
+#setwd
+setwd('C:\\Research data\\Postural_Control_Github\\raw_data_eyes_open')
+filenames <- Sys.glob("*.dat")  # however you get the list of file
+ALLES <- lapply(filenames, ALLESFUNCTIE)
+summary_statistics_EO <- do.call(rbind, ALLES) # combine into a single dataframe
+
+
+# Trial 1-2-3-4
+onetofour <- 1:4
+trial <- vector()
+for(i in 1:301){
+  trial <- c(trial, onetofour)
+}
+
+summary_statistics_EO$trial <- trial
+
+
+```
+
+
+## Eyes Closed
+```{r}
+
+
+ALLESFUNCTIE <- function
+(.file){
+  
+#subject number
+  trial=1
+  subj <- str_sub(.file, 3, 6)
+  names_split <- strsplit(subj, split='_', fixed=TRUE)
+  Subj <- unlist(names_split)
+  
+  Stance <-  "EC"
+  
+  # Selecting X and Y coordinates
+
+  data <- read.table(.file, skip=4, sep="")
+  data <- data[,c(8,9)]
+
+  # Create extra second at the beginning and at the end
+  extra1 <- data[c(1000:1),]
+  extra2 <- data[c(30000:29001),]
+
+  data <- rbind.data.frame(extra1, data, extra2)
+
+  colnames(data) <- c('FP.COFx', 'FP.COFy')
+  
+  # We make this "fake" points because butterworse filter will distort the first and last data points.
+  
+  # Butterworse filtering
+  f=1000
+  data$'FP.COFx' <- bwfilter(data$'FP.COFx', f=f, n=4, to=13)
+  data$'FP.COFy' <- bwfilter(data$'FP.COFy', f=f, n=4, to=13)
+
+  ROW <- nrow(data)
+  data <- data[c(1001:(ROW-1000)),] # Removing "fake" points after filter application
+  
+  # Ellipse area 
+  
+  # principle component analysis
+  pca <- princomp(data)
+  length1 <- 1.96*pca$sdev[1]
+  length2 <- 1.96*pca$sdev[2]
+  # SURFACE AREA CALCULATION
+  A <- length1*length2*pi
+  A_ELLIPSE <- as.numeric(A)
+  
+  colnames(data) <- c("X", "Y")
+  
+  # Pathlenghts
+  
+  diffx <- abs(diff(data$X))
+  diffy <- abs(diff(data$Y))
+  diffz <- sqrt(diffy^2+diffx^2)
+  
+  ML_PTH <- sum(diffx)
+  AP_PTH <- sum(diffy)
+  PL_PTH <- sum(diffz)
+  
+  Pathlength <-cbind(PL_PTH, ML_PTH, AP_PTH)
+
+cbind.data.frame(Subj, trial, Stance, ML_PTH, AP_PTH, PL_PTH, A_ELLIPSE)
+}
+
+#setwd
+setwd('C:\\Research data\\Postural_Control_Github\\raw_data_eyes_closed')
+filenames <- Sys.glob("*.dat")  # however you get the list of file
+ALLES <- lapply(filenames, ALLESFUNCTIE)
+summary_statistics_EC <- do.call(rbind, ALLES) # combine into a single dataframe
+
+
+```
+
+
+## Tandem Romberg
+```{r}
+
+
+ALLESFUNCTIE <- function
+(.file){
+  
+#subject number
+  
+  subj <- str_sub(.file, 3, 6)
+  names_split <- strsplit(subj, split='_', fixed=TRUE)
+  Subj <- unlist(names_split)
+  trial=1
+  Stance <- "TR"
+  
+  # Selecting X and Y coordinates
+
+  data <- read.table(.file, skip=4, sep="")
+  data <- data[,c(8,9)]
+
+  # Create extra second at the beginning and at the end
+  extra1 <- data[c(1000:1),]
+  extra2 <- data[c(30000:29001),]
+
+  data <- rbind.data.frame(extra1, data, extra2)
+
+  colnames(data) <- c('FP.COFx', 'FP.COFy')
+  
+  # We make this "fake" points because butterworse filter will distort the first and last data points.
+  
+  # Butterworse filtering
+  f=1000
+  data$'FP.COFx' <- bwfilter(data$'FP.COFx', f=f, n=4, to=13)
+  data$'FP.COFy' <- bwfilter(data$'FP.COFy', f=f, n=4, to=13)
+
+  ROW <- nrow(data)
+  data <- data[c(1001:(ROW-1000)),] # Removing "fake" points after filter application
+  
+  # Ellipse area 
+  
+  # principle component analysis
+  pca <- princomp(data)
+  length1 <- 1.96*pca$sdev[1]
+  length2 <- 1.96*pca$sdev[2]
+  # SURFACE AREA CALCULATION
+  A <- length1*length2*pi
+  A_ELLIPSE <- as.numeric(A)
+  
+  colnames(data) <- c("X", "Y")
+  
+  # Pathlenghts
+  
+  diffx <- abs(diff(data$X))
+  diffy <- abs(diff(data$Y))
+  diffz <- sqrt(diffy^2+diffx^2)
+  
+  ML_PTH <- sum(diffx)
+  AP_PTH <- sum(diffy)
+  PL_PTH <- sum(diffz)
+  
+  Pathlength <-cbind(PL_PTH, ML_PTH, AP_PTH)
+
+cbind.data.frame(Subj, trial, Stance, ML_PTH, AP_PTH, PL_PTH, A_ELLIPSE)
+}
+
+#setwd
+setwd('C:\\Research data\\Postural_Control_Github\\raw_data_tandem_romberg')
+filenames <- Sys.glob("*.dat")  # however you get the list of file
+ALLES <- lapply(filenames, ALLESFUNCTIE)
+summary_statistics_TR <- do.call(rbind, ALLES) # combine into a single dataframe
+
+
+
+summary_statistics <- rbind.data.frame(summary_statistics_EO, summary_statistics_EC, summary_statistics_TR)
+
+setwd("C:\\Research data\\Postural_Control_Github\\preprocessing_data")
+save(summary_statistics, file="summary_statistics.Rdata")
+
+
+```
+

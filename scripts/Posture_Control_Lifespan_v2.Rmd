@@ -1,0 +1,426 @@
+---
+title: "Postural Control Across the Lifespan"
+author: "Nathan van Humbeeck, Reinhold Kliegl, & Ralf Th. Krampe"
+date: '2021-10-01, revised: `r format(Sys.time())`'
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+    code_folding: show
+    toc_float: yes
+  word_document:
+    toc: yes
+    toc_depth: '2'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(car)
+library(lme4)
+library(hypr) 
+library(remef)
+library(broom.mixed)
+library(tidyverse)
+library(performance)
+library(parameters)
+library(see)
+library(summarytools)
+```
+
+
+# Preprocessing
+
++ select the "best performance" trial in stable stance
++ rename factors to upper case, dependent variables/covariates to lower case
++ relevel factors
++ rename and transform measures
+    + d_s = short-term diffusion coefficient
+    + d_l = long-term diffusion coefficient
+    + d_cx = Critical delay
++ compute linear within-group covariates age, mass, height
+
+```{r}
+load("LS3_total.Rdata")  # loading total dataset 
+
+df_w <-  
+  LS3_total |> 
+  rename(
+    Subj = subject, 
+    Stance = stance,
+    age = Age,
+    height = Length,
+    mass = Weight,
+    bmi = BMI) |> 
+  group_by(Subj, Stance) %>%  
+  filter(ellipse == min(ellipse)) |> 
+  mutate(
+    Group = as_factor(ifelse(age<15, "CH", ifelse(age>15 & age<40, "YA" , "OA"))),
+    Group = fct_relevel(Group, "CH", "YA", "OA"),
+    Sex = recode(as_factor(Sex),"1" = "Female" , "2" = "Male"),
+    Stance = as_factor(Stance),
+    Stance = fct_relevel(Stance, "TR", "SS", "EC"),
+    d_s = Diffusion_fast*1000,       # from mm²/ms to mm²/s
+    d_l = Diffusion_slow*1000,       # from mm²/ms to mm²/s
+    d_cx = Diffusion_cross/1000) |>  # from ms to s
+  group_by(Group) |> 
+  mutate(a1 = age - mean(age), 
+         m1 = mass - mean(mass), 
+         h1 = height - mean(height, na.rm=TRUE)) |> 
+  select(Subj, Group, Sex, age,  mass, height, bmi, a1, m1, h1, Stance, d_s, d_l, d_cx)
+
+df <- 
+  df_w |> 
+  pivot_longer(d_s:d_cx, names_to="Measure", values_to="score")
+```
+
+# Corrections
+
+Outliers identified below should be corrected or removed in this chunk.
+
+```{r}
+# The CoP trajectory of this trial shows that the participant lifted up one leg/fell.
+df <- df |>  mutate(score = ifelse( Subj== "165" & Stance == "TR", NA, score))
+
+# methodological flaw (crossover point is the intercept of the two regression lines)
+df <- df |> mutate(score = ifelse( Subj== "6271" & Stance == "TR" & Measure =="d_cx", NA, score))
+
+# delete missing scores
+df <- df |> filter(!is.na(score))
+```
+
+# LMM1 - d_s
+
+## Select a transformation
+
+```{r include=FALSE}
+df_s <-   df |> filter(Measure == "d_s")
+
+contrasts(df_s$Stance) <- MASS::contr.sdif(3)
+contrasts(df_s$Group) <- MASS::contr.sdif(3)
+contrasts(df_s$Sex) <- MASS::contr.sdif(2)
+
+mm_s1 <- lmer(score ~ 1 + Stance*(Group/(Sex*a1)) + (1| Subj), 
+                    data = df_s, REML = FALSE, 
+              control = lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore" ))
+check_model(mm_s1)
+
+# power transform for LMM residuals
+pt_s <- powerTransform(mm_s1, family="bcnPower")
+summary(pt_s)
+## - lambda=-0.03149194, not diff from zero
+## -  gamma=0.1; not far from zero either, anyway ...
+
+# transformed score
+df_s$tscore <- bcnPower(df_s$score, lambda=0, gamma=0.1)
+
+# refit LMM
+t_mm_s1 <- lmer(tscore ~ 1 + Stance*(Group/(Sex*a1)) + (1| Subj), 
+                    data = df_s, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(t_mm_s1)
+
+print(summary(t_mm_s1), corr=FALSE)
+```
+
+## Reduce FEs
+
+```{r include=FALSE}
+t_mm_s2 <- lmer(tscore ~ 1 + (Stance+Group/(Sex+a1))^2+ (1| Subj), 
+                    data = df_s, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+anova(t_mm_s2, t_mm_s1)
+
+print(summary(t_mm_s2), corr=FALSE)
+
+modmat_s <- model.matrix( ~  1 + Stance*(Group/(Sex*a1)), df_s )
+
+t_mm_s3 <- lmer(tscore ~ 1 + modmat_s[, 2:15 ] + (1| Subj), 
+                 data = df_s, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+
+anova(t_mm_s3, t_mm_s2, t_mm_s1)
+anova(t_mm_s3, t_mm_s1)
+
+print(summary(t_mm_s3), corr=FALSE)
+```
+
+## Expand REs
+
+```{r include=FALSE}
+df_s$st1 <- modmat_s[,2]
+df_s$st2 <- modmat_s[,3]
+
+t_mm_s4 <- lmer(tscore ~ 1 + modmat_s[,2:15] + (1 + st1 + st2 ||  Subj), 
+                 data = df_s, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+
+anova(t_mm_s3, t_mm_s4)
+print(summary(t_mm_s4), corr=FALSE)
+
+t_mm_s5 <- lmer(tscore ~ 1 + modmat_s[,2:15] + (1 + st1 + st2 | Subj), 
+                 data = df_s, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+print(summary(t_mm_s5), corr=FALSE)
+anova(t_mm_s3, t_mm_s4, t_mm_s5)  # Stay with 4
+```
+
+## Excursion to levels
+
+```{r}
+# Excursion to estimate VCs and CPs for scores/levels of Stance, not effects
+modmat_s0 <- model.matrix( ~  0 + Stance*(Group/(Sex*a1)), df_s )
+df_s$TR <- modmat_s0[,1]
+df_s$SS <- modmat_s0[,2]
+df_s$EC <- modmat_s0[,3]
+
+t_mm_sLvls <- lmer(tscore ~ 1 + modmat_s[,2:15] + (0 + TR + SS + EC  |  Subj), 
+                 data = df_s, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+```
+
+## Graphs
+
+### Group x Stance
+
+```{r}
+df_s |> 
+  group_by(Group, Stance) |> 
+  summarize(N=n(), tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) |> 
+  ggplot(aes(x=Group, y=tscore_M, group=Stance, color=Stance)) +
+  geom_point() + geom_line() +
+  geom_errorbar(aes(ymax=tscore_M+2*SE, ymin=tscore_M-2*SE), width=.01) +
+#  geom_smooth() +
+  theme_bw()
+```
+
+### age  x  Group
+
+```{r}
+df_s |> 
+  group_by(Group, Subj) |> 
+  summarize(N=n(), age_c = first(a1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) |> 
+  ggplot(aes(x=age_c, y=tscore_M, group=1, color=1)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  facet_grid(. ~ Group) +
+  theme_bw()
+```
+
+### Sex  x  Group
+
+```{r}
+df_s |> 
+  group_by(Group, Sex, Subj) |> 
+  summarize(N=n(),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) |> 
+  ggplot(aes(x=Group, y=tscore_M)) + 
+  geom_boxplot(aes(color=Sex)) +
+  theme_bw()
+```
+
+# LMM2 - d_l
+
+## Select a transformation
+
+```{r include=FALSE}
+df_l <-   df |> filter(Measure == "d_l")
+
+# remove one outlier -- looks like decimal coding error
+df_l |> 
+  group_by(Group, Sex, Stance) |> 
+  summarise(N=n(), score_M=mean(score), score_SD=sd(score))
+df_l[297, ]
+
+df_l <- df_l[-297, ] 
+
+contrasts(df_l$Stance) <- MASS::contr.sdif(3)
+contrasts(df_l$Group) <- MASS::contr.sdif(3)
+contrasts(df_l$Sex) <- MASS::contr.sdif(2)
+
+modmat_l <- model.matrix( ~  1 + Stance*(Group/(Sex+a1)), df_l )
+df_l$st1 <- modmat_l[,2]
+df_l$st2 <- modmat_l[,3]
+
+mm_l1 <- lmer(score ~ 1 + Stance*(Group/(Sex*a1))+ (1| Subj), 
+                    data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(mm_l1)
+
+# power transform for LMM residuals: 
+pt_l <- powerTransform(mm_l, family="bcnPower")
+summary(pt_l)
+## - lambda= 0.01557182, not diff from zero
+## -  gamma= 0.6922534;  different from zero either 
+
+# transformed score
+df_l$tscore <- bcnPower(df_l$score, lambda=0, gamma=0.69)  
+
+# refit LMM
+t_mm_l1 <- lmer(tscore ~ 1  + Stance*(Group/(Sex*a1))+ (1| Subj), 
+                    data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(t_mm_l1)
+
+print(summary(t_mm_l1), corr=FALSE)
+```
+
+## Reduce FEs
+
+```{r include=FALSE}
+t_mm_l2 <- lmer(tscore ~ 1 + Stance*(Group/a1) + (1| Subj), 
+                    data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+anova(t_mm_l2, t_mm_l1)
+
+print(summary(t_mm_l2), corr=FALSE)
+```
+
+## Expand REs
+
+```{r include=FALSE}
+t_mm_l3 <- lmer(tscore ~ 1 + Stance*(Group/a1) + (1 + st1 + st2 ||  Subj), 
+                 data = df_l, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+
+anova(t_mm_l2, t_mm_l3)
+print(summary(t_mm_l3), corr=FALSE)
+
+t_mm_l4 <- lmer(tscore ~ 1 + Stance*(Group/a1) + (1 + st1 + st2 | Subj), 
+                 data = df_l, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+anova(t_mm_l2, t_mm_l3, t_mm_l4)  # Stay with t_mm_l4
+print(summary(t_mm_l4), corr=FALSE)
+```
+
+## Graph:  age x Stance x Group 
+
+```{r}
+df_l |> 
+  group_by(Group, Stance, Subj) |> 
+  summarize(N=n(), age_c = first(a1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) |> 
+  ggplot(aes(x=age_c, y=tscore_M, group=Stance, color=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  facet_grid(. ~ Group) +
+  theme_bw()
+```
+
+
+# LMM3 - d_cx 
+
+The section is still a CONSTUCTION SITE.
+
+## Select a transformation
+
+### Iteration 1
+
+```{r include=FALSE}
+df_cx <-  df |> filter(Measure == "d_cx")
+
+contrasts(df_cx$Stance) <- MASS::contr.sdif(3)
+contrasts(df_cx$Group) <- MASS::contr.sdif(3)
+contrasts(df_cx$Sex) <- MASS::contr.sdif(2)
+
+df_cx |> 
+  group_by(Group, Sex, Stance) |> 
+  summarise(N=n(), score_M=mean(score), score_SD=sd(score))
+
+mm_cx0 <- lmer(score ~ 1  + Stance*(Group/(Sex*a1)) + (1| Subj), 
+                     data = df_cx, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(mm_cx0)
+
+# power transform for LMM residuals: 
+p_cx0 <- powerTransform(mm_cx0, family="bcnPower")
+## - lambda=0.208279,  different from zero
+## -  gamma=0.3065152;  different from zero  
+
+# transformed score
+df_cx$tscore <- bcnPower(df_cx$score, lambda=.21, gamma=0.31)  
+
+# refit LMM
+t_mm_cx0 <- lmer(tscore ~ 1  + Stance*(Group/(Sex*a1)) + (1| Subj), 
+                data = df_cx, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(t_mm_cx0)
+```
+
+### Iteration 2: 
+
+START OVER: refit LMM to score for `df` w/o outliers.
+
+We remove outliers identified in `t_mm_cx0`.
+
+```{r include=FALSE}
+ibad <- which(resid(t_mm_cx0) < -1)
+df_cx <- df_cx[-ibad,]
+
+contrasts(df_cx$Stance) <- MASS::contr.sdif(3)
+contrasts(df_cx$Group) <- MASS::contr.sdif(3)
+contrasts(df_cx$Sex) <- MASS::contr.sdif(2)
+
+mm_cx1 <- lmer(score ~ 1  + Stance*(Group/(Sex*a1)) + (1| Subj), 
+                     data = df_cx, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(mm_cx1)
+
+# power transform for LMM residuals: 
+p_cx1 <- powerTransform(mm_cx, family="bcnPower")
+summary(p_cx1)
+## - lambda= -0.4507433,  not different from zero
+## -  gamma= 0.3769453;  different from zero  
+
+# transformed score; we use lambda = -1/2  
+df_cx$tscore <- bcnPower(df_cx$score, lambda=-.50, gamma=0.38)  
+
+# refit LMM
+t_mm_cx1 <- lmer(tscore ~ 1  + Stance*(Group/(Sex*a1)) + (1| Subj), 
+                    data = df_cx, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(t_mm_cx1)
+
+print(summary(t_mm_cx1), corr=FALSE)
+```
+
+## Reduce FEs
+
+```{r}
+modmat_cx <- model.matrix( ~  1 + Stance*(Group/(Sex*a1)), df_cx )
+df_cx$st1 <- modmat_cx[,2]
+df_cx$st2 <- modmat_cx[,3]
+
+t_mm_cx2 <- lmer(tscore ~ 1 + modmat_cx[,2:15] + (1 |  Subj), 
+                 data = df_cx, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+
+anova(t_mm_cx2, t_mm_cx1)
+print(summary(t_mm_cx2), corr=FALSE)
+```
+
++ `Sex` could also be removed, but perhaps it is ok to keep some comparability in model complexity.
+
+## Expand REs
+
+```{r}
+t_mm_cx3 <- lmer(tscore ~ 1 + modmat_cx[,2:15] + (1 + st1 + st2 ||  Subj), 
+                 data = df_cx, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+anova(t_mm_cx2, t_mm_cx3)
+
+t_mm_cx4 <- lmer(tscore ~ 1 + modmat_cx[,2:15] + (1 + st1 + st2 |  Subj), 
+                 data = df_cx, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+anova(t_mm_cx2, t_mm_cx3, t_mm_cx4)
+```
+
+No improvement with VCs and CPs. We stay with `t_mm_cx1`.
+
+## Graphs: Group x Stance
+
+```{r}
+df_cx |> 
+  group_by(Group, Stance, Subj) |> 
+  summarize(N=n(),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) |> 
+  ggplot(aes(x=Group, y=tscore_M)) + 
+  geom_boxplot(aes(color=Stance)) +
+  theme_bw()
+```
+
+# Appendix
+
+```{r}
+sessionInfo()
+```
+
