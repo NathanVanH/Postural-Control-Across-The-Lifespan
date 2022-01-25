@@ -1,0 +1,820 @@
+
+# In this script we add all data files together and do the preprocessing
+
+
+```{r message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(car)
+library(lme4)
+library(hypr) 
+library(remef)
+library(broom.mixed)
+library(tidyverse)
+library(performance)
+library(parameters)
+library(see)
+library(summarytools)
+library(lmerTest)
+```
+
+
+# Merging participant info, summary statistics and diffusion parameters
+
++ loading all files
++ merging bio (participant info) to stabilogram parameters and merging stabilogram parameters to summary statistics
+
+
+```{r}
+setwd("C:\\Research data\\Postural_Control_Github\\preprocessing_data")
+
+# Load files
+load(file="bio.Rdata")
+load(file="stabilogram_parameters.Rdata")
+load(file="summary_statistics.Rdata")
+load(file="bmi_norms.Rdata")
+
+# Reordering/selecting correct columns
+participant_info <- BIO[,c(1,3,11,2,5,12,7)]
+
+# Merging
+LS3_total <- merge(participant_info, stabilogram_parameters, by = c("Subj"))
+LS3_total <- merge(LS3_total, summary_statistics, by = c("Subj", "trial", "Stance"))
+
+
+```
+
+# Preprocessing
+
++ estimate length for 5 participants with missing length
+
+```{r}
+
+# PP 108, 219, 227, 410, 428 missing (3 Children, 2 Young adults) 
+
+# Estimation (this can probably be done in an elegant way but I got stuck so I chose a practical way)
+# Also, the participant with the highest mass is NA, so he gets a length of 214 cm, while he is probably overmass. 
+
+# Participant 428 (Sex=1 group=CH)
+# Select the group
+
+df <- LS3_total %>% filter(Agegroup=="CH" & Sex == "1")
+
+# Estimate LM
+mod <- lm(df$Length ~  poly(df$mass, 2, raw = TRUE))
+
+# Estimate length participant based on mass
+l428 <- as.numeric(mod$coefficients[1]+(mod$coefficients[2]*df$mass[which(df$Subj %in% "428")][1])+(mod$coefficients[3]*df$mass[which(df$Subj %in% "428")][1]^2)) # Intercept + Mass*Coefficient
+
+# Replace NA 
+LS3_total$Length[which(LS3_total$Subj %in% "428")] <- l428
+
+
+##############################################################
+
+# Participant 410+108 (Sex=2 group=CH)
+# Select the group
+df <- LS3_total %>% filter(Agegroup=="CH" & Sex == "2" )
+
+# Estimate LM
+mod <- lm(df$Length ~  poly(df$mass, 2, raw = TRUE))
+
+# Estimate length participant based on mass
+l410 <- as.numeric(mod$coefficients[1]+(mod$coefficients[2]*df$mass[which(df$Subj %in% "410")][1])+(mod$coefficients[3]*df$mass[which(df$Subj %in% "410")][1]^2)) # Intercept + Mass*Coefficient
+
+# Replace NA 
+LS3_total$Length[which(LS3_total$Subj %in% "410")] <- l410
+
+# Estimate length participant based on mass
+l108 <- as.numeric(mod$coefficients[1]+(mod$coefficients[2]*df$mass[which(df$Subj %in% "108")][1])+(mod$coefficients[3]*df$mass[which(df$Subj %in% "108")][1]^2)) # Intercept + Mass*Coefficient
+
+# Replace NA 
+LS3_total$Length[which(LS3_total$Subj %in% "108")] <- l108
+
+##############################################################
+
+# Participant 219+227 (Sex=2 group=YA)
+# Select the group
+df <- LS3_total %>% filter(Agegroup=="YA" & Sex == "2" )
+
+# Estimate LM
+mod <- lm(df$Length ~  poly(df$mass, 2, raw = TRUE))
+
+# Estimate length participant based on mass
+l219 <- as.numeric(mod$coefficients[1]+(mod$coefficients[2]*df$mass[which(df$Subj %in% "219")][1])+(mod$coefficients[3]*df$mass[which(df$Subj %in% "219")][1]^2)) # Intercept + Mass*Coefficient
+
+# Replace NA 
+LS3_total$Length[which(LS3_total$Subj %in% "219")] <- l219
+
+# Estimate length participant based on mass
+l227 <- as.numeric(mod$coefficients[1]+(mod$coefficients[2]*df$mass[which(df$Subj %in% "227")][1])+(mod$coefficients[3]*df$mass[which(df$Subj %in% "227")][1]^2)) # Intercept + Mass*Coefficient
+
+# Replace NA 
+LS3_total$Length[which(LS3_total$Subj %in% "227")] <- l227
+
+
+```
+
+
+# Data wrangling
+
++ select the "best performance" trial in stable stance
++ rename factors to upper case, dependent variables/covariates to lower case
++ relevel factors
++ rename and transform measures
+    + d_s = short-term diffusion coefficient
+    + d_l = long-term diffusion coefficient
+    + d_cx = Critical delay
++ compute linear within-group covariates age, mass, height
+
+
+```{r}
+df_w <-  
+  LS3_total %>%  
+  rename(
+    age = Age,
+    height = Length,
+    ellipse = A_ELLIPSE,
+    planar = PL_PTH) %>%  
+  group_by(Subj, Stance) %>%  
+  filter(ellipse == min(ellipse)) %>%  
+  mutate(
+    bmi = mass / ((height/100)^2),
+    Group = as_factor(ifelse(age<15, "CH", ifelse(age>15 & age<40, "YA" , "OA"))),
+    Group = fct_relevel(Group, "CH", "YA", "OA"),
+    Sex = recode(as_factor(Sex),"1" = "Female" , "2" = "Male"),
+    Stance = recode(as_factor(Stance),"EO" = "SS" ),
+    Stance = as_factor(Stance),
+    Stance = fct_relevel(Stance, "EC", "SS", "TR"),
+    d_s = d_s*1000,       # from mm²/ms to mm²/s
+    d_l = d_l*1000,       # from mm²/ms to mm²/s
+    d_cx = d_cx/1000,
+    d_segm = d_segm/1000,) %>%   # from ms to s
+  group_by(Group) %>%  
+  mutate(a1 = age - mean(age), 
+         m1 = mass - mean(mass), 
+         h1 = height - mean(height, na.rm=TRUE)) %>%  
+  select(Subj, Group, Sex, age,  mass, height, bmi, a1, m1, h1, Stance, d_s, d_l, d_cx, d_segm)
+
+df <- 
+  df_w %>%  
+  pivot_longer(d_s:d_segm, names_to="Measure", values_to="score")
+
+```
+
+# Calculate "bmi_score" based on age and sex specific norms. 
+
+```{r}
+# Round age (only have norms until 79 yo )
+df <- df %>% mutate(age_round = ifelse(age<18, (round(age/0.5)*0.5),  round(age)) )
+df <- df %>% mutate(age_round = ifelse(age_round>79, 79,  age_round ))
+
+# Calculation of bmi score    ==   SDS (x;a) = (BMI / M(a))^L(a)-1/(L(a)*S(a)) 
+
+### Selecting the correct row in norm table 
+
+bmi_row <- vector()
+for(i in 1:nrow(df)) {bmi_row[i]  <- which(df$age_round[i] == bmi_norms$age & df$Sex[i]  == bmi_norms$Sex)}
+df$bmi_row <- bmi_row
+
+### Calculation
+df <- df %>% 
+  mutate(bmi_score = (((bmi/bmi_norms$M[bmi_row])^bmi_norms$L[bmi_row])-1 ) /(bmi_norms$L[bmi_row]*bmi_norms$S[bmi_row]))
+
+### Mean center BMI
+df <-  
+  df %>%  
+  group_by(Group) %>%  
+  mutate(bmi1 = bmi_score - mean(bmi_score)) 
+
+```
+
+
+# Corrections
+
++ Outliers identified below should be corrected or removed in this chunk.
+
+```{r}
+# The CoP trajectory of this trial shows that the participant lifted up one leg/fell.
+df <- df %>%   mutate(score = ifelse( Subj== "165" & Stance == "TR", NA, score))
+df <- df %>%  mutate(score = ifelse( Subj== "176" & Stance == "TR", NA, score))
+
+# methodological flaw (crossover point is the intercept of the two regression lines)
+df <- df %>%  mutate(score = ifelse( Subj== "6271" & Stance == "TR" & Measure =="d_cx", NA, score))
+
+# Participant with club (n=1) feet and ADHD (n=1)
+df <- df %>%   mutate(score = ifelse(Subj== c("1071", "1081" ), NA, score)) 
+
+# Technical error? Always same pattern in sway across all movement, seems artificial
+
+df <- df %>%  mutate(score = ifelse( Subj== "724" & Stance == "TR", NA, score))
+
+
+# Fit procedure failed, extremely bad fit, segmented did not select "correct point". 
+
+df <- df %>%  mutate(score = ifelse( Subj== "613" & Stance == "EC", NA, score))
+df <- df %>%  mutate(score = ifelse( Subj== "120" & Stance == "TR", NA, score))
+df <- df %>%  mutate(score = ifelse( Subj== "6271" & Stance == "TR", NA, score))
+
+
+# delete missing scores
+df <- df %>%  filter(!is.na(score))
+
+
+```
+
+
+
+# Linear Mixed Models
+
+## Defining Contrasts
+
+```{r}
+
+contrasts(df$Sex) <- MASS::contr.sdif(2)
+
+my.contrast = matrix(c(0.6666667, -0.3333333, -0.3333333, -0.3333333, -0.3333333, 0.6666667), ncol = 2)
+colnames(my.contrast) <- c("EC-SS", "TR-SS")
+rownames(my.contrast) <- rownames(MASS::contr.sdif(3))
+
+contrasts(df$Stance) <- my.contrast
+
+colnames(my.contrast) <- c("CH-YA", "OA-YA")
+contrasts(df$Group) <- my.contrast
+
+```
+
+
+# LMM1 - d_s
+
+## Select a transformation
+
+```{r}
+# Select variable
+df_s <-   df %>%  filter(Measure == "d_s")
+
+# Select model matrix
+modmat_s <- model.matrix( ~  1 + Stance*(Group/(Sex*a1*bmi1)) , df_s )
+df_s$st1 <- modmat_s[,2]
+df_s$st2 <- modmat_s[,3]
+
+# transform data
+df_s$tscore <- log10(df_s$score) # Transformation needed
+
+# Run base model
+t_mm_s1 <- lmer(tscore ~ 1 +  Stance*(Group/(Sex*a1*bmi1)) + (1| Subj), 
+                    data = df_s, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(t_mm_s1)
+print(summary(t_mm_s1), corr=FALSE)
+
+```
+
+## Reduce Fixed Effects
+
+### 1. Remove Sex
+```{r} 
+t_mm_s2 <- lmer(tscore ~ 1 + Stance*(Group/(a1*bmi1)) + (1| Subj), 
+                    data = df_s, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_s2), corr=FALSE)
+```
+
+### 2. Remove a1:bmi1 and a1: ... : ...                                                
+```{r}
+# Remove covariate * covariate interactions and other irelevant covariate interactions
+modmat_s <- model.matrix( ~  1 + Stance*(Group/(a1*bmi1)) , df_s )
+t_mm_s3 <- lmer(tscore ~ 1 + modmat_s[, c(2:15, 25:30) ] + (1| Subj), 
+                 data = df_s, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_s3), corr=FALSE)
+
+```
+
+### 3. Remove BMI? 
+```{r}
+modmat_s <- model.matrix( ~  1 + Stance*(Group/(a1)) , df_s )
+
+t_mm_s4 <- lmer(tscore ~ 1 + modmat_s[, c(2:12) ] + (1| Subj), 
+                 data = df_s, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_s4), corr=FALSE)
+
+```
+
+## Compare models
+```{r}
+anova( t_mm_s2, t_mm_s1)
+anova( t_mm_s2, t_mm_s3)
+anova( t_mm_s4, t_mm_s3)
+```
+
+### 4. Expand RE - Including BMI 
+```{r}
+modmat_s <- model.matrix( ~  1 + Stance*(Group/(a1*bmi1)) , df_s )
+t_mm_s4 <- lmer(tscore ~ 1 + modmat_s[, c(2:15, 25:30) ]  + (1 + st1 + st2 ||  Subj), 
+                 data = df_s, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+```
+
+### 5. Expand RE - Removed BMI 
+```{r}
+modmat_s <- model.matrix( ~  1 + Stance*(Group/(a1)) , df_s )
+t_mm_s5 <- lmer(tscore ~ 1 + modmat_s[, c(2:12) ] + (1 + st1 + st2 ||  Subj), 
+                 data = df_s, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+
+print(summary(t_mm_s4), corr=FALSE)
+print(summary(t_mm_s5), corr=FALSE)
+
+```
+
+## Excursion to levels
+
+```{r}
+# Excursion to estimate VCs and CPs for scores/levels of Stance, not effects
+modmat_s0 <- model.matrix( ~  0 + Stance*(Group/(Sex*a1)), df_s )
+df_s$TR <- modmat_s0[,1]
+df_s$SS <- modmat_s0[,2]
+df_s$EC <- modmat_s0[,3]
+
+t_mm_sLvls <- lmer(tscore ~ 1 + modmat_s[,2:15] + (0 + TR + SS + EC  |  Subj), 
+                 data = df_s, REML = FALSE, 
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+
+VarCorr(t_mm_sLvls)
+```
+
+
+
+
+
+
+
+## Graphs
+
+### Recode variables
+
+```{r}
+df_s$Group <- recode(df_s$Group, CH = "Children", YA = "Young Adults", OA = "Older Adults" )
+df_s$Stance <- recode(df_s$Stance, SS = "Stable Stance", EC = "Eyes Closed", TR = "Tandem Romberg" )
+df_s$Stance <- factor(df_s$Stance, levels = c("Stable Stance", "Eyes Closed", "Tandem Romberg"))
+```
+
+### Group x Stance
+
+```{r}
+df_s %>%  
+  group_by(Group, Stance) %>%  
+  summarize(N=n(), tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=Group, y=10^tscore_M, group=Stance, color=Stance)) +
+  geom_point( position=position_dodge(.2)) + geom_line( position=position_dodge(.2)) +
+  geom_errorbar(aes(ymax=10^(tscore_M+2*SE), ymin=10^(tscore_M-2*SE)), width=.2,  position=position_dodge(.2)) +
+  theme_bw() +   ylab(bquote(Short-Term~Diffusion~Coefficient~(mm^2~s^-1)))   +  xlab("") + scale_y_log10() 
+
+```
+
+### BMI x Stance
+
+```{r}
+df_s %>%  
+  group_by(Group, Stance, Subj) %>%  
+  summarize(N=n(), bmi1 = first(bmi1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=bmi1, y=10^tscore_M, group=Stance, color=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  ylab(bquote(Short-Term~Diffusion~Coefficient~(mm^2~s^-1))) +
+  theme_bw() + scale_y_log10() 
+
+```
+
+### a1 x Group --> all Stances collapsed
+
+```{r}
+df_s %>%  
+  group_by(Group, Subj) %>%  
+  summarize(N=n(), age_c = first(a1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=age_c, y=10^tscore_M, group=1)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  facet_grid(. ~ Group) +
+  ylab(bquote(Short-Term~Diffusion~Coefficient~(mm^2~s^-1))) +
+  xlab("Mean-Centered Age Coefficient (years)") +
+  theme_bw() + scale_y_log10() 
+
+```
+
+
+### a1 x Group 
+
+```{r}
+df_s %>%  
+  group_by(Group, Stance, Subj) %>%  
+  summarize(N=n(), age_c = first(a1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=age_c, y=10^tscore_M, group=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE, aes( color = Stance)) +
+  ylab(bquote(Short-Term~Diffusion~Coefficient~(mm^2~s^-1))) +
+  facet_grid(. ~ Group) +
+  theme_bw() + scale_y_log10() +
+    xlab("Mean-Centered Age Coefficient (years)") 
+```
+
+# Plot BMI * Stance * Group
+
+```{r}
+df_s %>%  
+  group_by(Stance, Group, Subj) %>%  
+  summarize(N=n(), Sex = first(Sex), bmi_score = first(bmi_score),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=bmi_score, y=10^tscore_M, group=Stance, color=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  theme_bw() +
+  facet_wrap(.~Group) + scale_y_log10() +   ylab(bquote(Short-Term~Diffusion~Coefficient~(mm^2~s^-1))) + xlab("Z-score Body Mass Index [± SD]")
+
+```
+
+
+
+
+
+
+
+# LMM2 - d_l
+
+## Select a transformation
+
+```{r  }
+df_l <-   df %>%  filter(Measure == "d_l") # Select variable
+
+# setup model matrix and stance model coefficients
+modmat_l <- model.matrix( ~  1 + Stance*(Group/(Sex*a1)), df_l )
+df_l$st1 <- modmat_l[,2]
+df_l$st2 <- modmat_l[,3]
+
+mm_l1 <- lmer(score ~ 1 + Stance*(Group/(Sex*a1*bmi1))+ (1| Subj), 
+                    data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+#check_model(mm_l1)
+
+# power transform for LMM residuals: 
+pt_l <- powerTransform(mm_l1, family="bcnPower")
+summary(pt_l)
+
+
+## - lambda= -0.0884    , not different from zero
+## -  gamma= 0.8412    ;  different from zero  
+
+# transformed score
+
+df_l$tscore <- bcnPower(df_l$score, lambda=0, gamma=.85) 
+
+# refit LMM
+t_mm_l1 <- lmer(tscore ~ 1 + Stance*(Group/(Sex*a1*bmi1))+ (1| Subj), 
+                    data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(t_mm_l1)
+print(summary(t_mm_l1), corr=FALSE)
+
+
+```
+
+## Reduce FEs
+
+### 1. Remove Sex
+
+```{r}
+t_mm_l2 <- lmer(tscore ~ 1 + Stance*(Group/(a1*bmi1))+ (1| Subj), 
+                    data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_l2), corr=FALSE)
+```
+
+### 2. Remove interactions a1:bmi1:... 
+```{r}
+modmat_l <- model.matrix( ~  1 +Stance*(Group/(a1*bmi1)), df_l )
+t_mm_l3 <- lmer(tscore~ 1 + modmat_l[,c(2:15, 19:30) ] + (1| Subj),
+                   data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_l3), corr=FALSE)
+```
+
+### 2. Remove  bmi1
+
+```{r}
+
+modmat_l <- model.matrix( ~  1 +Stance*(Group/(a1)), df_l )
+df_l$st1 <- modmat_l[,2]
+df_l$st2 <- modmat_l[,3]
+
+t_mm_l4 <- lmer(tscore~ 1 + modmat_l[,2:18] + (1| Subj),
+                   data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_l4), corr=FALSE)
+
+
+
+```
+
+# Compare models
+```{r}
+anova( t_mm_l2, t_mm_l1) # nearly all noise
+anova( t_mm_l2, t_mm_l3) # All noise
+anova( t_mm_l4, t_mm_l3) # significantly different
+
+```
+
+## Expand RE
+
+### including BMI
+```{r}
+modmat_l <- model.matrix( ~  1 +Stance*(Group/(a1)), df_l)
+t_mm_l5 <- lmer(tscore~ 1 + modmat_l[,2:18] + (1+ st1 + st2 || Subj),
+                   data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_l5), corr=FALSE)
+```
+
+### excluding BMI
+```{r}
+modmat_l <- model.matrix( ~  1 + Stance *(Group/(a1*bmi1)), df_l )
+t_mm_l6 <- lmer(tscore~ 1 + modmat_l[,c(2:15, 19:30) ] + (1+ st1 + st2 || Subj),
+                   data = df_l, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_l6), corr=FALSE)
+```
+
+# Compare models
+```{r}
+anova( t_mm_l6, t_mm_l5) # significantly different
+
+```
+
+
+
+
+
+
+
+## Graphs
+
+### Recode variables
+
+```{r}
+df_l$Group <- recode(df_l$Group, CH = "Children", YA = "Young Adults", OA = "Older Adults" )
+df_l$Stance <- recode(df_l$Stance, SS = "Stable Stance", EC = "Eyes Closed", TR = "Tandem Romberg" )
+df_l$Stance <- factor(df_l$Stance, levels = c("Stable Stance", "Eyes Closed", "Tandem Romberg"))
+```
+
+
+### Group x Stance
+
+```{r}
+df_l %>%  
+  group_by(Group, Stance) %>%  
+  summarize(N=n(), tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=Group, y=bcnPowerInverse(tscore_M, lambda=0, gamma=.85), group=Stance, color=Stance)) +
+  geom_point( position=position_dodge(.2)) + geom_line( position=position_dodge(.2)) +
+  geom_errorbar(aes(ymax=bcnPowerInverse(tscore_M+2*SE, lambda=0, gamma=.85), ymin=bcnPowerInverse(tscore_M-2*SE, lambda=0, gamma=.85)), width=.2,  position=position_dodge(.2)) +
+  theme_bw() +   ylab(bquote(Long-Term~Diffusion~Coefficient~(mm^2~s^-1)))   +  xlab("") + scale_y_log10()
+
+```
+
+### BMI x Stance
+
+```{r}
+library(ggallin)
+
+df_l %>%  
+  group_by(Group, Stance, Subj) %>%  
+  summarize(N=n(), bmi1 = first(bmi1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=bmi1, y=bcnPowerInverse(tscore_M, lambda=0, gamma=.85), group=Stance, color=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  ylab(bquote(Long-Term~Diffusion~Coefficient~(mm^2~s^-1)))  +
+  theme_bw() + scale_y_continuous(trans = pseudolog10_trans)
+
+```
+
+### a1 x Group --> all Stances collapsed
+
+```{r}
+df_l %>%  
+  group_by(Group, Subj) %>%  
+  summarize(N=n(), age_c = first(a1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=age_c, y=bcnPowerInverse(tscore_M, lambda=0, gamma=.85), group=1)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  facet_grid(. ~ Group) +
+  ylab(bquote(Long-Term~Diffusion~Coefficient~(mm^2~s^-1))) +
+  xlab("Mean-Centered Age Coefficient (years)") +
+  theme_bw() + scale_y_continuous(trans = pseudolog10_trans)
+
+```
+
+
+### a1 x Group 
+
+```{r}
+df_l %>%  
+  group_by(Group, Stance, Subj) %>%  
+  summarize(N=n(), age_c = first(a1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=age_c, y=bcnPowerInverse(tscore_M, lambda=0, gamma=.85), group=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE, aes( color = Stance)) +
+  ylab(bquote(Long-Term~Diffusion~Coefficient~(mm^2~s^-1)))  +
+  facet_grid(. ~ Group) +
+  theme_bw() +  scale_y_continuous(trans = pseudolog10_trans)+
+    xlab("Mean-Centered Age Coefficient (years)") 
+```
+
+# Plot BMI * Stance * Group
+
+```{r}
+df_l %>%  
+  group_by(Stance, Group, Subj) %>%  
+  summarize(N=n(), Sex = first(Sex), bmi_score = first(bmi_score),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=bmi_score, y=bcnPowerInverse(tscore_M, lambda=0, gamma=.85), group=Stance, color=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  theme_bw() +
+  facet_wrap(.~Group)  + scale_y_continuous(trans = pseudolog10_trans) +   ylab(bquote(Long-Term~Diffusion~Coefficient~(mm^2~s^-1)))  + xlab("Z-score Body Mass Index [± SD]")
+
+```
+
+
+
+
+
+
+
+
+
+# LMM3 - d_segm 
+
+## Select a transformation
+
+```{r  }
+# Selecting the variable
+df_segm <-  df %>%  filter(Measure == "d_segm")
+
+# Select model matrix
+modmat_segm <- model.matrix( ~  1 + Stance*(Group/(Sex*a1*bmi1)) , df_segm )
+df_segm$st1 <- modmat_s[,2]
+df_segm$st2 <- modmat_s[,3]
+
+# it might be better for plotting/transparency/reproducibility to use log transform
+df_segm$tscore <- log10(df_segm$score)
+
+# LMM
+t_mm_segm1 <- lmer(tscore ~ 1 + Stance*(Group/(Sex*a1*bmi1)) + (1| Subj), 
+                data = df_segm, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+check_model(t_mm_segm1)
+print(summary(t_mm_segm1), corr=FALSE)
+
+```
+
+## Reduce Fixed Effects
+
+### 1. Remove Sex
+```{r} 
+t_mm_segm2 <- lmer(tscore ~ 1 + Stance*(Group/(a1*bmi1)) + (1| Subj), 
+                    data = df_segm, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_segm2), corr=FALSE)
+```
+
+### 2. Remove a1:bmi1 and a1: ... : ...                                                
+```{r}
+# Remove covariate * covariate interactions and other irelevant covariate interactions
+modmat_segm <- model.matrix( ~  1 + Stance*(Group/(a1*bmi1)) , df_segm )
+t_mm_segm3 <- lmer(tscore ~ 1 + modmat_segm[, c(2:15, 25:30) ] + (1| Subj), 
+                 data = df_segm, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_segm3), corr=FALSE)
+
+```
+
+### 3. Remove BMI? 
+```{r}
+modmat_segm <- model.matrix( ~  1 + Stance*(Group/(a1)) , df_s )
+
+t_mm_segm4 <- lmer(tscore ~ 1 + modmat_segm[, c(2:12) ] + (1| Subj), 
+                 data = df_segm, REML = FALSE, control = lmerControl(calc.derivs=FALSE ))
+print(summary(t_mm_segm4), corr=FALSE)
+
+```
+
+## Compare models
+```{r}
+anova( t_mm_segm2, t_mm_segm1) # Remove Sex 61.64 36    0.00493 **
+anova( t_mm_segm2, t_mm_segm3) # Remove noise
+anova( t_mm_segm4, t_mm_segm3) # Remove BMI
+```
+
+### 4. Expand RE - Including BMI 
+```{r}
+modmat_segm <- model.matrix( ~  1 + Stance*(Group/(a1*bmi1)) , df_segm )
+t_mm_segm5 <- lmer(tscore ~ 1 + modmat_segm[, c(2:15, 25:30) ]  + (1 + st1 + st2 ||  Subj), 
+                 data = df_segm, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+```
+
+### 5. Expand RE - Removed BMI 
+```{r}
+modmat_segm <- model.matrix( ~  1 + Stance*(Group/(a1)) , df_segm )
+t_mm_segm6 <- lmer(tscore ~ 1 + modmat_segm[, c(2:12) ] + (1 + st1 + st2 ||  Subj), 
+                 data = df_segm, REML = FALSE, #
+                 control=lmerControl(calc.derivs=FALSE, check.nobs.vs.nRE="ignore"))
+
+print(summary(t_mm_segm5), corr=FALSE)
+print(summary(t_mm_segm6), corr=FALSE)
+
+```
+
+
+```{r}
+anova(t_mm_segm5, t_mm_segm3)
+anova(t_mm_segm6, t_mm_segm4) # Model 6
+```
+
+
+
+## Graphs
+
+### Recode variables
+
+```{r}
+df_segm$Group <- recode(df_segm$Group, CH = "Children", YA = "Young Adults", OA = "Older Adults" )
+df_segm$Stance <- recode(df_segm$Stance, SS = "Stable Stance", EC = "Eyes Closed", TR = "Tandem Romberg" )
+df_segm$Stance <- factor(df_segm$Stance, levels = c("Stable Stance", "Eyes Closed", "Tandem Romberg"))
+```
+
+### Group x Stance
+
+```{r}
+df_segm %>%  
+  group_by(Group, Stance) %>%  
+  summarize(N=n(), tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=Group, y=10^tscore_M, group=Stance, color=Stance)) +
+  geom_point( position=position_dodge(.2)) + geom_line( position=position_dodge(.2)) +
+  geom_errorbar(aes(ymax=10^(tscore_M+2*SE), ymin=10^(tscore_M-2*SE)), width=.2,  position=position_dodge(.2)) +
+  theme_bw() +   ylab("Critical Delay (s)")  +  xlab("") + scale_y_log10() 
+
+```
+
+### BMI x Stance
+
+```{r}
+df_segm %>%  
+  group_by(Group, Stance, Subj) %>%  
+  summarize(N=n(), bmi1 = first(bmi1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=bmi1, y=10^tscore_M, group=Stance, color=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  ylab("Critical Delay (s)")  +
+  theme_bw() + scale_y_log10() 
+
+```
+
+### a1 x Group --> all Stances collapsed
+
+```{r}
+df_segm %>%  
+  group_by(Group, Subj) %>%  
+  summarize(N=n(), age_c = first(a1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=age_c, y=10^tscore_M, group=1)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  facet_grid(. ~ Group) +
+  ylab("Critical Delay (s)")  +
+  xlab("Mean-Centered Age Coefficient (years)") +
+  theme_bw() + scale_y_log10() 
+
+```
+
+
+### a1 x Group 
+
+```{r}
+df_segm %>%  
+  group_by(Group, Stance, Subj) %>%  
+  summarize(N=n(), age_c = first(a1),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=age_c, y=10^tscore_M, group=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE, aes( color = Stance)) +
+  ylab("Critical Delay (s)")  +
+  facet_grid(. ~ Group) +
+  theme_bw() + scale_y_log10() +
+    xlab("Mean-Centered Age Coefficient (years)") 
+```
+
+# Plot BMI * Stance * Group
+
+```{r}
+df_segm %>%  
+  group_by(Stance, Group, Subj) %>%  
+  summarize(N=n(), Sex = first(Sex), bmi_score = first(bmi_score),  tscore_M = mean(tscore), SE = sd(tscore)/sqrt(N)) %>%  
+  ggplot(aes(x=bmi_score, y=10^tscore_M, group=Stance, color=Stance)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  theme_bw() +
+  facet_wrap(.~Group) + scale_y_log10() +   ylab("Critical Delay (s)") + xlab("Z-score Body Mass Index [± SD]")
+
+```
+
+
+# Appendix
+
+```{r}
+sessionInfo()
+```
+
+
+
